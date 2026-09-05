@@ -1,0 +1,10 @@
+streamlit
+pandas
+supabase
+openai
+pypdf
+reportlab
+python-dateutil
+plotly
+openpyxl
+python-telegram-bot

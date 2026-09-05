@@ -1,0 +1,23 @@
+# Chaves e segredos do Streamlit (NUNCA sobem para o Git)
+.streamlit/secrets.toml
+
+# Variáveis de ambiente
+.env
+*.env
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
+
+# Arquivos temporários e cache do Python
+__pycache__/
+*.pyc
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+
+# Configurações da IDE
+.vscode/
+.idea/
