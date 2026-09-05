@@ -33,13 +33,16 @@ def processar_texto_com_ia(texto: str) -> dict:
     prompt_sistema = """
     Você é a Alice. Analise o texto do usuário e retorne ESTRITAMENTE em JSON:
 
-    1. Se for REGISTRO financeiro (ex: gastei 50 reais, paguei conta, recebi 5000):
+    1. Se for REGISTRO financeiro efetuado (ex: gastei 50 reais, paguei conta, recebi 5000):
        {"tipo_acao": "registro", "descricao": "nome", "valor": 50.0, "tipo": "despesa", "categoria": "Alimentação"}
 
-    2. Se for para MEMORIZAR um fato permanente:
+    2. Se for uma PERGUNTA/SIMULAÇÃO DE COMPRA ou DUVIDA SE PODE GASTAR (ex: posso comprar um fone de 200?, posso gastar 500 no shopping?, quando posso comprar um celular?):
+       {"tipo_acao": "simulacao_compra", "item": "nome do item ou motivo", "valor": 200.0}
+
+    3. Se for para MEMORIZAR um fato permanente:
        {"tipo_acao": "memorizar", "fato": "Descrição do fato"}
 
-    3. Se for BATE-PAPO, DÚVIDA, PERGUNTA, PIADA OU SIMULAÇÃO:
+    4. Se for BATE-PAPO, DÚVIDA GERAL, PERGUNTA OU PIADA:
        {"tipo_acao": "consulta"}
     """
     try:
@@ -81,6 +84,44 @@ def processar_imagem_com_ia(image_bytes: bytes) -> dict:
     except Exception as e:
         return {"tipo_acao": "erro", "mensagem": f"Erro visual: {str(e)}"}
 
+def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: float) -> str:
+    fatos_longo_prazo = carregar_fatos()
+    rec_real = df_trans[df_trans['tipo'] == 'receita']['valor'].sum() if not df_trans.empty else 0.0
+    des_real = abs(df_trans[df_trans['tipo'] == 'despesa']['valor'].sum()) if not df_trans.empty else 0.0
+    saldo_disponivel = rec_real - des_real
+
+    prompt_sistema = f"""
+    Você é a Alice, uma assistente pessoal e parceira inteligente, bem-humorada, sincera e direta.
+    
+    [DADOS FINANCEIROS ATUAIS]
+    • Saldo Efetivado Atual: R$ {saldo_disponivel:,.2f}
+    • Conhecimento Prévio/Regras Pessoais: {fatos_longo_prazo}
+
+    [MISSÃO]
+    O usuário quer saber se pode gastar ou comprar o seguinte:
+    • Item/Motivo: {item if item else 'Gasto geral'}
+    • Valor Pretendido: R$ {valor_compra:,.2f}
+
+    REGRAS DE RESPOSTA:
+    1. Calcule o impacto financeiro:
+       - Saldo restante após a compra = Saldo Atual (R$ {saldo_disponivel:,.2f}) - Valor Pretendido (R$ {valor_compra:,.2f}).
+    2. Dê um parecer direto:
+       - Se o saldo cobrir com folga, diga que pode comprar, mas com moderação.
+       - Se o saldo ficar negativo ou muito apertado, diga claramente que NÃO é um bom momento e explique o porquê.
+       - Se a pergunta envolver "QUANDO posso gastar", estime quanto precisa acumular ou sugerir esperar as próximas entradas.
+    3. Seja curta, prática e humana, sem enrolação. Use emojis com moderação.
+    """
+
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": prompt_sistema}],
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Erro ao analisar compra: {str(e)}"
+
 def consultar_alice(df_trans: pd.DataFrame, historico_mensagens: list, texto_atual: str) -> str:
     fatos_longo_prazo = carregar_fatos()
     rec_real = df_trans[df_trans['tipo'] == 'receita']['valor'].sum() if not df_trans.empty else 0.0
@@ -100,7 +141,6 @@ def consultar_alice(df_trans: pd.DataFrame, historico_mensagens: list, texto_atu
     3. Mantenha o tom natural, conciso e amigável.
     """
     
-    # Monta as mensagens garantindo a presença do texto atual no final
     mensagens_api = [{"role": "system", "content": prompt_sistema}] + historico_mensagens
     mensagens_api.append({"role": "user", "content": texto_atual})
     

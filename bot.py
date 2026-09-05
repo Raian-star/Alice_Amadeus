@@ -13,7 +13,7 @@ from database import (
 )
 from ai import (
     processar_texto_com_ia, processar_imagem_com_ia,
-    transcrever_audio, consultar_alice
+    transcrever_audio, consultar_alice, analisar_simulacao_compra
 )
 
 # Configuração de Logs
@@ -40,6 +40,7 @@ async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👋 *Olá! Eu sou a Alice, sua assistente pessoal.*\n\n"
             "Posso te ajudar a:\n"
             "• Registrar seus gastos e ganhos diários (texto, áudio ou foto).\n"
+            "• Analisar se você pode comprar algo ou quando pode gastar.\n"
             "• Responder dúvidas, fazer simulações e conversas gerais.\n"
             "• Memorizar regras e preferências sobre você.\n\n"
             "💬 *Como posso te ajudar agora?*",
@@ -90,7 +91,7 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
     texto_usuario = ""
 
     try:
-        # Áudio (Transcrição silenciosa sem envio de mensagem intermediária)
+        # Áudio
         if update.message.voice or update.message.audio:
             registrar_log("🎙️ Processando áudio...")
             arquivo = await (update.message.voice or update.message.audio).get_file()
@@ -135,7 +136,7 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         analise = processar_texto_com_ia(texto_usuario)
         tipo_acao = analise.get("tipo_acao")
 
-        # ROTA 1: Registrar movimentação
+        # ROTA 1: Registrar movimentação efetuada
         if tipo_acao == "registro":
             registrar_transacao(
                 descricao=analise["descricao"],
@@ -153,26 +154,36 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode="Markdown"
             )
 
-        # ROTA 2: Memorizar fato/repreensa
+        # ROTA 2: Simulação / Análise de Compra ("Posso gastar?")
+        elif tipo_acao == "simulacao_compra":
+            df_trans = carregar_dados()
+            item = analise.get("item", "Gasto pretendido")
+            valor = float(analise.get("valor", 0.0))
+            
+            resposta = analisar_simulacao_compra(df_trans, item, valor)
+            
+            salvar_mensagem_memoria("user", texto_usuario)
+            salvar_mensagem_memoria("assistant", resposta)
+            
+            await update.message.reply_text(resposta, parse_mode="Markdown")
+
+        # ROTA 3: Memorizar fato
         elif tipo_acao == "memorizar":
             salvar_fato(analise["fato"])
             await update.message.reply_text(f"🧠 *Aprendi novo fato:* \"{analise['fato']}\"", parse_mode="Markdown")
 
-        # ROTA 3: Bate-papo / Dúvida / Pergunta / Piada / Consulta
+        # ROTA 4: Bate-papo geral
         else:
             df_trans = carregar_dados()
             
-            # Carrega o histórico recente do banco
             historico_raw = carregar_memoria_chat(limite=3)
             historico_formatado = []
             for item in historico_raw:
                 papel = "user" if item.get("papel") == "user" else "assistant"
                 historico_formatado.append({"role": papel, "content": item.get("conteudo", "")})
 
-            # Chama a IA passando o texto atual diretamente
             resposta = consultar_alice(df_trans, historico_formatado, texto_usuario)
             
-            # Salva o par da conversa na memória após a resposta
             salvar_mensagem_memoria("user", texto_usuario)
             salvar_mensagem_memoria("assistant", resposta)
             
@@ -195,7 +206,6 @@ def _rodar_polling():
         app.add_handler(CommandHandler("pdf", comando_pdf))
         app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, responder_mensagem))
 
-        # Derruba conexões pendentes para prevenir erro de conflito
         loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
         app.run_polling(drop_pending_updates=True, stop_signals=None, close_loop=False)
     except Exception as e:
