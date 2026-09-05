@@ -62,21 +62,34 @@ def processar_texto_com_ia(texto: str) -> dict:
         return {"tipo_acao": "consulta"}
 
 def processar_imagem_com_ia(image_bytes: bytes) -> dict:
+    fatos_usuario = carregar_fatos()
+    
     try:
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
-        prompt_sistema = """
+        prompt_sistema = f"""
+        Você é um analisador de comprovantes bancários altamente preciso.
+        
+        [CONTEXTO DO USUÁRIO]
+        Fatos sobre o dono da conta: {fatos_usuario}
+        
         Analise a imagem financeiro/nota/comprovante e retorne ESTRITAMENTE em JSON:
         
-        Se for nota/comprovante/extrato legível:
-        {
+        {{
             "tipo_acao": "registro",
-            "descricao": "Item ou Estabelecimento",
+            "descricao": "Nome da pessoa/empresa ou estabelecimento",
             "valor": 45.50,
-            "tipo": "despesa", // Ou "receita" (ex: PIX recebido, comprovante de transferência recebida)
-            "categoria": "Alimentação" // Categorias: Alimentação, Moradia, Transporte, Saúde, Lazer, Assinaturas, Educação, Investimentos, Salário, Outros
-        }
-        Caso contrário:
-        {"tipo_acao": "erro", "mensagem": "Comprovante não identificado."}
+            "tipo": "despesa", // Ou "receita"
+            "categoria": "Outros"
+        }}
+        
+        REGRAS RÍGIDAS DE CLASSIFICAÇÃO PARA COMPROVANTES E PIX:
+        1. Identifique o titular da conta através dos fatos do usuário ou da conta ativa.
+        2. Se o titular da conta for o DESTINATÁRIO (recebeu a transferência / consta no 'Destino'), classifique OBRIGATORIAMENTE como "tipo": "receita".
+        3. Se o titular for o PAGADOR/REMETENTE (efetuou o pagamento / consta na 'Origem'), classifique como "tipo": "despesa".
+        4. Para notas fiscais e cupons de compras em lojas/mercados, classifique sempre como "tipo": "despesa".
+        
+        CATEGORIAS VÁLIDAS:
+        Alimentação, Moradia, Transporte, Saúde, Lazer, Assinaturas, Educação, Investimentos, Salário, Outros.
         """
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -84,7 +97,7 @@ def processar_imagem_com_ia(image_bytes: bytes) -> dict:
             messages=[
                 {"role": "system", "content": prompt_sistema},
                 {"role": "user", "content": [
-                    {"type": "text", "text": "Extraia os dados financeiros:"},
+                    {"type": "text", "text": "Analise o comprovante atentamente aos campos Origem e Destino:"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]}
             ]
@@ -98,6 +111,7 @@ def processar_imagem_com_ia(image_bytes: bytes) -> dict:
         return {"tipo_acao": "erro", "mensagem": f"Erro visual: {str(e)}"}
 
 def processar_pdf_com_ia(pdf_bytes: bytes) -> dict:
+    fatos_usuario = carregar_fatos()
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         texto_extraido = ""
@@ -107,21 +121,25 @@ def processar_pdf_com_ia(pdf_bytes: bytes) -> dict:
         if not texto_extraido.strip():
             return {"tipo_acao": "erro", "mensagem": "Não foi possível extrair o texto deste PDF (pode ser uma imagem digitalizada)."}
 
-        prompt_sistema = """
+        prompt_sistema = f"""
         Você é um assistente financeiro especialista em análise de documentos.
+        
+        [CONTEXTO DO USUÁRIO]
+        Fatos sobre o dono da conta: {fatos_usuario}
+
         Analise o texto do PDF e retorne ESTRITAMENTE em JSON:
         
-        {
+        {{
             "tipo_acao": "registro",
             "descricao": "Nome do estabelecimento, pagador ou emissor",
             "valor": 150.00,
             "tipo": "despesa",  
             "categoria": "Outros"
-        }
+        }}
         
         REGRAS DE CLASSIFICAÇÃO PARA 'tipo':
-        • 'despesa': Faturas de cartão, boletos bancários a pagar, notas fiscais, recibos de compras, comprovantes de envio de PIX/transferência enviada.
-        • 'receita': Comprovantes de PIX recebido, comprovantes de depósito, holerites/contracheques, extratos de rendimentos, reembolsos.
+        • Se o titular/usuário for o DESTINATÁRIO (consta em 'Destino' ou 'Beneficiário'), classifique como "receita".
+        • Se o titular for o PAGADOR/REMETENTE (consta em 'Origem' ou 'Pagador'), faturas a pagar ou boletos, classifique como "despesa".
         
         CATEGORIAS VÁLIDAS:
         Alimentação, Moradia, Transporte, Saúde, Lazer, Assinaturas, Educação, Investimentos, Salário, Outros.
