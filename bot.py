@@ -16,7 +16,6 @@ from ai import (
     transcrever_audio, consultar_alice, analisar_simulacao_compra
 )
 
-# Configuração de Logs
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -132,11 +131,11 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if not texto_usuario:
             return
 
-        # Classificação do texto recebido
+        # Classificação do texto
         analise = processar_texto_com_ia(texto_usuario)
         tipo_acao = analise.get("tipo_acao")
 
-        # ROTA 1: Registrar movimentação efetuada
+        # ROTA 1: Registrar movimentação
         if tipo_acao == "registro":
             registrar_transacao(
                 descricao=analise["descricao"],
@@ -154,13 +153,13 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode="Markdown"
             )
 
-        # ROTA 2: Simulação / Análise de Compra ("Posso gastar?")
+        # ROTA 2: Simulação de Compra 
         elif tipo_acao == "simulacao_compra":
             df_trans = carregar_dados()
             item = analise.get("item", "Gasto pretendido")
             valor = float(analise.get("valor", 0.0))
             
-            resposta = analisar_simulacao_compra(df_trans, item, valor)
+            resposta = analisar_simulacao_compra(df_trans, item, valor, texto_usuario)
             
             salvar_mensagem_memoria("user", texto_usuario)
             salvar_mensagem_memoria("assistant", resposta)

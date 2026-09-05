@@ -4,6 +4,7 @@ import json
 import base64
 import pandas as pd
 import streamlit as st
+from datetime import datetime
 from openai import OpenAI
 from pypdf import PdfReader
 from database import carregar_fatos, carregar_despesas_fixas
@@ -36,7 +37,7 @@ def processar_texto_com_ia(texto: str) -> dict:
     1. Se for REGISTRO financeiro efetuado (ex: gastei 50 reais, paguei conta, recebi 5000):
        {"tipo_acao": "registro", "descricao": "nome", "valor": 50.0, "tipo": "despesa", "categoria": "Alimentação"}
 
-    2. Se for uma PERGUNTA/SIMULAÇÃO DE COMPRA ou DUVIDA SE PODE GASTAR (ex: posso comprar um fone de 200?, posso gastar 500 no shopping?, quando posso comprar um celular?):
+    2. Se for uma PERGUNTA/SIMULAÇÃO DE COMPRA ou DUVIDA SE PODE GASTAR (ex: posso comprar um fone de 200?, posso gastar 500 no shopping?, posso comprar um pc em dezembro?):
        {"tipo_acao": "simulacao_compra", "item": "nome do item ou motivo", "valor": 200.0}
 
     3. Se for para MEMORIZAR um fato permanente:
@@ -84,32 +85,38 @@ def processar_imagem_com_ia(image_bytes: bytes) -> dict:
     except Exception as e:
         return {"tipo_acao": "erro", "mensagem": f"Erro visual: {str(e)}"}
 
-def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: float) -> str:
+def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: float, texto_usuario: str) -> str:
     fatos_longo_prazo = carregar_fatos()
     rec_real = df_trans[df_trans['tipo'] == 'receita']['valor'].sum() if not df_trans.empty else 0.0
     des_real = abs(df_trans[df_trans['tipo'] == 'despesa']['valor'].sum()) if not df_trans.empty else 0.0
     saldo_disponivel = rec_real - des_real
 
+    meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+    data_atual = f"{meses[datetime.now().month - 1]} de {datetime.now().year}"
+
     prompt_sistema = f"""
-    Você é a Alice, uma assistente pessoal e parceira inteligente, bem-humorada, sincera e direta.
+    Você é a Alice, uma assistente pessoal financeira.
     
-    [DADOS FINANCEIROS ATUAIS]
+    [DADOS FINANCEIROS E TEMPORAIS]
+    • Data Atual: {data_atual}
     • Saldo Efetivado Atual: R$ {saldo_disponivel:,.2f}
-    • Conhecimento Prévio/Regras Pessoais: {fatos_longo_prazo}
+    • Conhecimento Prévio: {fatos_longo_prazo}
 
     [MISSÃO]
-    O usuário quer saber se pode gastar ou comprar o seguinte:
+    O usuário quer simular uma compra.
+    • Mensagem original: "{texto_usuario}"
     • Item/Motivo: {item if item else 'Gasto geral'}
     • Valor Pretendido: R$ {valor_compra:,.2f}
 
     REGRAS DE RESPOSTA:
-    1. Calcule o impacto financeiro:
-       - Saldo restante após a compra = Saldo Atual (R$ {saldo_disponivel:,.2f}) - Valor Pretendido (R$ {valor_compra:,.2f}).
-    2. Dê um parecer direto:
-       - Se o saldo cobrir com folga, diga que pode comprar, mas com moderação.
-       - Se o saldo ficar negativo ou muito apertado, diga claramente que NÃO é um bom momento e explique o porquê.
-       - Se a pergunta envolver "QUANDO posso gastar", estime quanto precisa acumular ou sugerir esperar as próximas entradas.
-    3. Seja curta, prática e humana, sem enrolação. Use emojis com moderação.
+    1. Identifique se a compra é IMEDIATA ou FUTURA (ex: "em dezembro", "ano que vem") analisando a mensagem original.
+    2. Se for IMEDIATA:
+       - Subtraia do saldo atual. Se faltar dinheiro, informe que não é o momento.
+    3. Se for PROJEÇÃO FUTURA:
+       - Calcule quantos meses faltam entre a Data Atual e a data desejada.
+       - Se o saldo não cobrir o valor total, calcule exatamente quanto falta e divida pelos meses restantes.
+       - Monte um mini plano de ação claro (ex: "Faltam 3 meses. Você precisará juntar R$ X por mês até lá para conseguir comprar à vista").
+    4. Seja direta, humana e motivadora.
     """
 
     try:
