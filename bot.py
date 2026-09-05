@@ -12,7 +12,7 @@ from database import (
     carregar_memoria_chat, gerar_pdf_bytes
 )
 from ai import (
-    processar_texto_com_ia, processar_imagem_com_ia,
+    processar_texto_com_ia, processar_imagem_com_ia, processar_pdf_com_ia,
     transcrever_audio, consultar_alice, analisar_simulacao_compra
 )
 
@@ -38,7 +38,7 @@ async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "👋 *Olá! Eu sou a Alice, sua assistente pessoal.*\n\n"
             "Posso te ajudar a:\n"
-            "• Registrar seus gastos e ganhos diários (texto, áudio ou foto).\n"
+            "• Registrar seus gastos e ganhos diários (texto, áudio, foto ou PDF).\n"
             "• Analisar se você pode comprar algo ou quando pode gastar.\n"
             "• Responder dúvidas, fazer simulações e conversas gerais.\n"
             "• Memorizar regras e preferências sobre você.\n\n"
@@ -90,8 +90,38 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
     texto_usuario = ""
 
     try:
+        # Documento PDF
+        if update.message.document:
+            doc = update.message.document
+            if doc.mime_type == 'application/pdf' or doc.file_name.lower().endswith('.pdf'):
+                registrar_log("📄 Processando documento PDF...")
+                arquivo = await doc.get_file()
+                pdf_bytes = await arquivo.download_as_bytearray()
+                
+                res_pdf = processar_pdf_com_ia(bytes(pdf_bytes))
+                
+                if res_pdf.get("tipo_acao") == "registro":
+                    registrar_transacao(
+                        descricao=res_pdf["descricao"],
+                        valor=res_pdf["valor"],
+                        categoria=res_pdf.get("categoria", "Outros"),
+                        tipo=res_pdf["tipo"]
+                    )
+                    sinal = "🟢 Entrada" if res_pdf["tipo"] == "receita" else "🔴 Saída"
+                    await update.message.reply_text(
+                        f"✅ *Documento PDF Processado e Salvo!*\n\n"
+                        f"📌 *Descrição:* {res_pdf['descricao']}\n"
+                        f"💰 *Valor:* R$ {res_pdf['valor']:,.2f}\n"
+                        f"🏷️ *Categoria:* {res_pdf.get('categoria', 'Outros')}\n"
+                        f"📊 *Tipo:* {sinal}",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await update.message.reply_text(f"⚠️ {res_pdf.get('mensagem', 'Não foi possível extrair dados desse PDF.')}")
+                return
+
         # Áudio
-        if update.message.voice or update.message.audio:
+        elif update.message.voice or update.message.audio:
             registrar_log("🎙️ Processando áudio...")
             arquivo = await (update.message.voice or update.message.audio).get_file()
             audio_bytes = await arquivo.download_as_bytearray()

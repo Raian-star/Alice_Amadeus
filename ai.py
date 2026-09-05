@@ -65,9 +65,16 @@ def processar_imagem_com_ia(image_bytes: bytes) -> dict:
     try:
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
         prompt_sistema = """
-        Analise a imagem e retorne em JSON:
-        Se for nota/comprovante legível:
-        {"tipo_acao": "registro", "descricao": "Item/Local", "valor": 45.50, "tipo": "despesa", "categoria": "Alimentação"}
+        Analise a imagem financeiro/nota/comprovante e retorne ESTRITAMENTE em JSON:
+        
+        Se for nota/comprovante/extrato legível:
+        {
+            "tipo_acao": "registro",
+            "descricao": "Item ou Estabelecimento",
+            "valor": 45.50,
+            "tipo": "despesa", // Ou "receita" (ex: PIX recebido, comprovante de transferência recebida)
+            "categoria": "Alimentação" // Categorias: Alimentação, Moradia, Transporte, Saúde, Lazer, Assinaturas, Educação, Investimentos, Salário, Outros
+        }
         Caso contrário:
         {"tipo_acao": "erro", "mensagem": "Comprovante não identificado."}
         """
@@ -77,19 +84,68 @@ def processar_imagem_com_ia(image_bytes: bytes) -> dict:
             messages=[
                 {"role": "system", "content": prompt_sistema},
                 {"role": "user", "content": [
-                    {"type": "text", "text": "Extraia os dados:"},
+                    {"type": "text", "text": "Extraia os dados financeiros:"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]}
             ]
         )
-        return json.loads(response.choices[0].message.content)
+        res = json.loads(response.choices[0].message.content)
+        if res.get("tipo_acao") == "registro":
+            tipo_orig = str(res.get("tipo", "")).strip().lower()
+            res["tipo"] = "receita" if tipo_orig in ["receita", "ganho", "entrada", "lucro"] else "despesa"
+        return res
     except Exception as e:
         return {"tipo_acao": "erro", "mensagem": f"Erro visual: {str(e)}"}
+
+def processar_pdf_com_ia(pdf_bytes: bytes) -> dict:
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        texto_extraido = ""
+        for page in reader.pages:
+            texto_extraido += page.extract_text() or ""
+
+        if not texto_extraido.strip():
+            return {"tipo_acao": "erro", "mensagem": "Não foi possível extrair o texto deste PDF (pode ser uma imagem digitalizada)."}
+
+        prompt_sistema = """
+        Você é um assistente financeiro especialista em análise de documentos.
+        Analise o texto do PDF e retorne ESTRITAMENTE em JSON:
+        
+        {
+            "tipo_acao": "registro",
+            "descricao": "Nome do estabelecimento, pagador ou emissor",
+            "valor": 150.00,
+            "tipo": "despesa",  
+            "categoria": "Outros"
+        }
+        
+        REGRAS DE CLASSIFICAÇÃO PARA 'tipo':
+        • 'despesa': Faturas de cartão, boletos bancários a pagar, notas fiscais, recibos de compras, comprovantes de envio de PIX/transferência enviada.
+        • 'receita': Comprovantes de PIX recebido, comprovantes de depósito, holerites/contracheques, extratos de rendimentos, reembolsos.
+        
+        CATEGORIAS VÁLIDAS:
+        Alimentação, Moradia, Transporte, Saúde, Lazer, Assinaturas, Educação, Investimentos, Salário, Outros.
+        """
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": prompt_sistema},
+                {"role": "user", "content": f"Texto do documento PDF:\n{texto_extraido[:3500]}"}
+            ]
+        )
+        res = json.loads(response.choices[0].message.content)
+        if res.get("tipo_acao") == "registro":
+            tipo_orig = str(res.get("tipo", "")).strip().lower()
+            res["tipo"] = "receita" if tipo_orig in ["receita", "ganho", "entrada", "lucro"] else "despesa"
+        return res
+    except Exception as e:
+        return {"tipo_acao": "erro", "mensagem": f"Erro ao ler PDF: {str(e)}"}
 
 def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: float, texto_usuario: str) -> str:
     fatos_longo_prazo = carregar_fatos()
     
-    # Saldo atual efetivado
     rec_real = df_trans[df_trans['tipo'] == 'receita']['valor'].sum() if not df_trans.empty else 0.0
     des_real = abs(df_trans[df_trans['tipo'] == 'despesa']['valor'].sum()) if not df_trans.empty else 0.0
     saldo_atual = rec_real - des_real
