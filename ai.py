@@ -94,23 +94,21 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
     des_real = abs(df_trans[df_trans['tipo'] == 'despesa']['valor'].sum()) if not df_trans.empty else 0.0
     saldo_atual = rec_real - des_real
 
-    # Projeção de fluxo fixo mensal
     try:
         df_fixas = carregar_despesas_fixas()
-        rec_fixa = df_fixas[df_fixas['tipo'] == 'receita']['valor'].sum() if not df_fixas.empty else 0.0
-        des_fixa = abs(df_fixas[df_fixas['tipo'] == 'despesa']['valor'].sum()) if not df_fixas.empty else 0.0
-        folga_mensal = rec_fixa - des_fixa
     except Exception:
-        folga_mensal = 0.0
+        df_fixas = pd.DataFrame()
 
-    mes_atual = datetime.now().month
+    hoje = datetime.now()
+    mes_atual = hoje.month
+    ano_atual = hoje.year
+
     meses_map = {
         "janeiro": 1, "fevereiro": 2, "março": 3, "abril": 4, 
         "maio": 5, "junho": 6, "julho": 7, "agosto": 8, 
         "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12
     }
     
-    # Tenta encontrar um mês no texto do usuário para calcular os meses restantes em Python
     meses_restantes = 0
     texto_lower = texto_usuario.lower()
     for nome_mes, num_mes in meses_map.items():
@@ -121,7 +119,42 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
                 meses_restantes = (12 - mes_atual) + num_mes # Ano seguinte
             break
             
-    caixa_total_previsto = saldo_atual + (folga_mensal * meses_restantes)
+    # Projeção de fluxo fixo iterativo (Mês a Mês) considerando data_fim
+    caixa_total_previsto = saldo_atual
+    
+    for i in range(1, meses_restantes + 1):
+        mes_futuro = mes_atual + i
+        ano_futuro = ano_atual
+        if mes_futuro > 12:
+            ano_futuro += (mes_futuro - 1) // 12
+            mes_futuro = ((mes_futuro - 1) % 12) + 1
+            
+        folga_deste_mes = 0.0
+        
+        if not df_fixas.empty:
+            for _, row in df_fixas.iterrows():
+                valido = True
+                data_fim_str = row.get('data_fim')
+                
+                # Verifica se o gasto expirou neste mês específico
+                if pd.notna(data_fim_str) and data_fim_str:
+                    try:
+                        data_fim_obj = datetime.strptime(str(data_fim_str), "%Y-%m-%d")
+                        if ano_futuro > data_fim_obj.year or (ano_futuro == data_fim_obj.year and mes_futuro > data_fim_obj.month):
+                            valido = False
+                    except ValueError:
+                        pass
+                
+                if valido:
+                    valor = float(row['valor'])
+                    tipo = row.get('tipo', 'despesa')
+                    if tipo == 'receita':
+                        folga_deste_mes += valor
+                    else:
+                        folga_deste_mes -= abs(valor)
+                        
+        caixa_total_previsto += folga_deste_mes
+
     valor_faltante = valor_compra - caixa_total_previsto
 
     prompt_sistema = f"""
