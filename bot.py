@@ -32,19 +32,37 @@ def registrar_log(mensagem):
         LOGS_STREAMLIT.pop(0)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+ALLOWED_TELEGRAM_ID = os.environ.get("ALLOWED_TELEGRAM_ID")
 
-# --- FUNÇÃO AUXILIAR DE RESPOSTA (DECIDE ENTRE TEXTO OU ÁUDIO) ---
+# --- TRAVA DE SEGURANÇA EXCLUSIVA ---
+async def verificar_autorizacao(update: Update) -> bool:
+    user_id = str(update.effective_user.id)
+    
+    if not ALLOWED_TELEGRAM_ID:
+        await update.message.reply_text(
+            f"⚠️ **Aviso de Segurança:**\nA variável de proteção `ALLOWED_TELEGRAM_ID` não está configurada.\n\n"
+            f"O seu ID do Telegram é: `{user_id}`\n\n"
+            f"Coloque esse número nas Secrets do Streamlit para bloquear o acesso de estranhos.",
+            parse_mode="Markdown"
+        )
+        return True # Libera temporariamente até você configurar
+        
+    if user_id != str(ALLOWED_TELEGRAM_ID):
+        registrar_log(f"🚨 Bloqueado: Tentativa de acesso do ID {user_id}")
+        return False
+        
+    return True
+
+# --- FUNÇÃO AUXILIAR DE RESPOSTA ---
 async def responder_final(update: Update, context: ContextTypes.DEFAULT_TYPE, texto: str):
     if context.user_data.get('modo_voz', False):
         await context.bot.send_chat_action(chat_id=update.message.chat_id, action="record_voice")
         try:
-            # Remove formatação markdown para a voz ficar mais fluida
             texto_limpo = texto.replace('*', '').replace('_', '')
             audio_bytes = gerar_audio_resposta(texto_limpo)
             await context.bot.send_voice(
                 chat_id=update.message.chat_id,
                 voice=io.BytesIO(audio_bytes)
-                # Caption removido conforme solicitado
             )
         except Exception as e:
             registrar_log(f"Erro ao gerar áudio: {str(e)}")
@@ -52,8 +70,8 @@ async def responder_final(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     else:
         await update.message.reply_text(texto, parse_mode="Markdown")
 
-
 async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await verificar_autorizacao(update): return
     registrar_log(f"📥 Recebido /start de: {update.effective_user.first_name}")
     if update.message:
         await update.message.reply_text(
@@ -68,6 +86,7 @@ async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await verificar_autorizacao(update): return
     registrar_log("📥 Recebido /relatorio")
     df = carregar_dados()
     if df.empty:
@@ -87,6 +106,7 @@ async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def comando_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await verificar_autorizacao(update): return
     registrar_log("📥 Recebido /pdf")
     df = carregar_dados()
     if df.empty:
@@ -102,10 +122,9 @@ async def comando_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def comando_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
+    if not await verificar_autorizacao(update): return
+    if not update.message: return
     
-    # Alterna o estado do modo de voz
     estado_atual = context.user_data.get('modo_voz', False)
     novo_estado = not estado_atual
     context.user_data['modo_voz'] = novo_estado
@@ -115,10 +134,9 @@ async def comando_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("🔇 *Modo de voz DESATIVADO!*\nVoltei a responder por texto.", parse_mode="Markdown")
 
-
 async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
+    if not await verificar_autorizacao(update): return
+    if not update.message: return
 
     chat_id = update.message.chat_id
     registrar_log(f"📥 Nova mensagem no Chat ID {chat_id}")
