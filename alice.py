@@ -4,7 +4,7 @@ import streamlit as st
 # 1. CONFIGURAÇÃO DA PÁGINA (Sempre no topo antes de renderizar)
 st.set_page_config(
     page_title="Alice - Painel ADM",
-    page_icon="alice.png" if os.path.exists("alice.png") else "👩‍💼",  # Utiliza o arquivo de imagem se presente
+    page_icon="alice.png" if os.path.exists("alice.png") else "👩‍💼",
     layout="wide"
 )
 
@@ -193,7 +193,7 @@ with tab1:
         st.write(f"- **Realizado até hoje:** Entradas R$ {rec_mes_real:,.2f} | Saídas R$ {des_mes_real:,.2f}")
         st.write(f"- **Pendente de vencimento/recebimento:** Entradas R$ {rec_pendente:,.2f} | Saídas R$ {des_pendente:,.2f}")
 
-    # VISÃO 3: PROJEÇÃO FUTURA (FÓRMULA DIRETA DE CAIXA)
+    # VISÃO 3: PROJEÇÃO FUTURA (FÓRMULA DIRETA DE CAIXA CONSIDERANDO DATA_FIM)
     with v_futuro:
         st.subheader("🔮 Projeção para Meses Futuros")
         st.caption("Acompanhe o fluxo financeiro estimado para os próximos meses de forma direta.")
@@ -206,59 +206,102 @@ with tab1:
             
         data_alvo = date(ano_sel, mes_sel, 1)
         
-        # 1. SALDO ACUMULADO ATÉ O MÊS ANTERIOR
+        # 1. SALDO ACUMULADO ATÉ O MÊS ANTERIOR (Realizado)
         saldo_acumulado_inicial = 0.0
         if not df_trans.empty:
             df_trans['data_dt'] = pd.to_datetime(df_trans['data']).dt.date
-            trans_passadas = df_trans[df_trans['data_dt'] < data_alvo]
+            trans_passadas = df_trans[df_trans['data_dt'] < date(hoje.year, hoje.month, 1)]
             rec_hist = trans_passadas[trans_passadas['tipo'] == 'receita']['valor'].sum()
             des_hist = abs(trans_passadas[trans_passadas['tipo'] == 'despesa']['valor'].sum())
             saldo_acumulado_inicial = rec_hist - des_hist
 
+        # 2. CÁLCULO ITERATIVO DA FOLGA ATÉ O MÊS ALVO
         inicio_mes_atual = date(hoje.year, hoje.month, 1)
-        if data_alvo > inicio_mes_atual and not df_fixas.empty:
-            if "tipo" not in df_fixas.columns:
-                df_fixas["tipo"] = "despesa"
-                
-            rec_fixa_m = df_fixas[df_fixas['tipo'] == 'receita']['valor'].sum()
-            des_fixa_m = df_fixas[df_fixas['tipo'] == 'despesa']['valor'].sum()
-            lucro_mensal_fixo = rec_fixa_m - des_fixa_m
+        saldo_final_previsto = saldo_acumulado_inicial
+        
+        if not df_fixas.empty and 'data_fim' not in df_fixas.columns:
+            df_fixas['data_fim'] = None
             
-            curr = inicio_mes_atual
-            meses_intermediarios = 0
-            while curr < data_alvo:
-                if curr != inicio_mes_atual:
-                    meses_intermediarios += 1
-                curr += relativedelta(months=1)
-                
-            saldo_acumulado_inicial += (meses_intermediarios * lucro_mensal_fixo)
-
-        # 2. OPERAÇÃO DO MÊS SELECIONADO
+        curr = inicio_mes_atual
+        folga_mensal_alvo = 0.0
         rec_futura = 0.0
         des_futura = 0.0
-        if not df_fixas.empty:
-            rec_futura = df_fixas[df_fixas['tipo'] == 'receita']['valor'].sum()
-            des_futura = df_fixas[df_fixas['tipo'] == 'despesa']['valor'].sum()
+        
+        while curr <= data_alvo:
+            folga_deste_mes = 0.0
+            rec_este_mes = 0.0
+            des_este_mes = 0.0
             
-        folga_mensal = rec_futura - des_futura
-        saldo_final_previsto = saldo_acumulado_inicial + folga_mensal
+            if not df_fixas.empty:
+                for _, row in df_fixas.iterrows():
+                    valido = True
+                    data_fim_str = row.get('data_fim')
+                    
+                    if pd.notna(data_fim_str) and data_fim_str:
+                        try:
+                            data_fim_obj = datetime.strptime(str(data_fim_str), "%Y-%m-%d").date()
+                            if curr.year > data_fim_obj.year or (curr.year == data_fim_obj.year and curr.month > data_fim_obj.month):
+                                valido = False
+                        except ValueError:
+                            pass
+                            
+                    if valido:
+                        valor = float(row['valor'])
+                        tipo = row.get('tipo', 'despesa')
+                        if tipo == 'receita':
+                            folga_deste_mes += valor
+                            rec_este_mes += valor
+                        else:
+                            folga_deste_mes -= abs(valor)
+                            des_este_mes += abs(valor)
+            
+            saldo_final_previsto += folga_deste_mes
+            
+            if curr == data_alvo:
+                folga_mensal_alvo = folga_deste_mes
+                rec_futura = rec_este_mes
+                des_futura = des_este_mes
+                
+            curr += relativedelta(months=1)
 
         # 3. FÓRMULA DIRETA (2 CARTÕES DE DESTAQUE)
         c1, c2 = st.columns(2)
-        c1.metric(f"Folga Financeira do Mês ({mes_sel:02d}/{ano_sel})", f"R$ {folga_mensal:,.2f}")
-        c2.metric(f"Caixa Total Previsto em Conta", f"R$ {saldo_final_previsto:,.2f}", delta=f"R$ {saldo_acumulado_inicial:,.2f} acumulado inicial")
+        c1.metric(f"Folga Financeira do Mês ({mes_sel:02d}/{ano_sel})", f"R$ {folga_mensal_alvo:,.2f}")
+        c2.metric(f"Caixa Total Previsto em Conta", f"R$ {saldo_final_previsto:,.2f}", delta=f"R$ {saldo_acumulado_inicial:,.2f} acumulado real inicial")
 
-        # 4. DETALHAMENTO EXPANDÍVEL
-        with st.expander("🔍 Ver Detalhamento dos Lançamentos Fixos do Mês"):
+        # 4. DETALHAMENTO EXPANDÍVEL (Apenas itens válidos no mês alvo)
+        with st.expander("🔍 Ver Detalhamento dos Lançamentos Fixos Válidos no Mês"):
             col_rec, col_des = st.columns(2)
+            
+            df_exibicao = pd.DataFrame()
+            if not df_fixas.empty:
+                validos_idx = []
+                for idx, row in df_fixas.iterrows():
+                    v = True
+                    dfim = row.get('data_fim')
+                    if pd.notna(dfim) and dfim:
+                        try:
+                            dobj = datetime.strptime(str(dfim), "%Y-%m-%d").date()
+                            if data_alvo.year > dobj.year or (data_alvo.year == dobj.year and data_alvo.month > dobj.month):
+                                v = False
+                        except ValueError:
+                            pass
+                    if v:
+                        validos_idx.append(idx)
+                df_exibicao = df_fixas.loc[validos_idx]
+
             with col_rec:
                 st.markdown(f"**Entradas Fixas Previstas:** R$ {rec_futura:,.2f}")
-                if not df_fixas.empty:
-                    st.dataframe(df_fixas[df_fixas['tipo'] == 'receita'][['descricao', 'valor', 'dia_vencimento']], hide_index=True, use_container_width=True)
+                if not df_exibicao.empty:
+                    df_rec = df_exibicao[df_exibicao['tipo'] == 'receita']
+                    if not df_rec.empty:
+                        st.dataframe(df_rec[['descricao', 'valor', 'dia_vencimento']], hide_index=True, use_container_width=True)
             with col_des:
                 st.markdown(f"**Saídas Fixas Previstas:** R$ {des_futura:,.2f}")
-                if not df_fixas.empty:
-                    st.dataframe(df_fixas[df_fixas['tipo'] == 'despesa'][['descricao', 'valor', 'dia_vencimento']], hide_index=True, use_container_width=True)
+                if not df_exibicao.empty:
+                    df_desp = df_exibicao[df_exibicao['tipo'] == 'despesa']
+                    if not df_desp.empty:
+                        st.dataframe(df_desp[['descricao', 'valor', 'dia_vencimento']], hide_index=True, use_container_width=True)
 
         st.divider()
         col_exp_pdf, col_exp_excel = st.columns(2)
@@ -345,7 +388,8 @@ with tab3:
                 for _, item in desp_df.iterrows():
                     c_info, c_btn = st.columns([4, 1])
                     with c_info:
-                        st.info(f"📌 **{item['descricao']}** — R$ {item['valor']:.2f} (Dia {item['dia_vencimento']}) [{item['categoria']}]")
+                        data_fim_txt = f" | 🏁 Término: {item['data_fim']}" if pd.notna(item.get('data_fim')) and item.get('data_fim') else ""
+                        st.info(f"📌 **{item['descricao']}** — R$ {item['valor']:.2f} (Dia {item['dia_vencimento']}) [{item['categoria']}]{data_fim_txt}")
                     with c_btn:
                         if st.button("🗑️", key=f"del_desp_{item['id']}"):
                             deletar_despesa_fixa(item['id'])
@@ -389,7 +433,7 @@ with tab4:
         else:
             st.write("Nenhum aprendizado registrado.")
 
-# ABA 5: STATUS DO BOT (Importação e execução isoladas para evitar travamento da página)
+# ABA 5: STATUS DO BOT
 with tab5:
     st.subheader("📱 Status e Diagnóstico do Bot do Telegram")
     
