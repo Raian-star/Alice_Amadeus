@@ -33,6 +33,26 @@ def registrar_log(mensagem):
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
+# --- FUNÇÃO AUXILIAR DE RESPOSTA (DECIDE ENTRE TEXTO OU ÁUDIO) ---
+async def responder_final(update: Update, context: ContextTypes.DEFAULT_TYPE, texto: str):
+    if context.user_data.get('modo_voz', False):
+        await context.bot.send_chat_action(chat_id=update.message.chat_id, action="record_voice")
+        try:
+            # Remove formatação markdown para a voz ficar mais fluida
+            texto_limpo = texto.replace('*', '').replace('_', '')
+            audio_bytes = gerar_audio_resposta(texto_limpo)
+            await context.bot.send_voice(
+                chat_id=update.message.chat_id,
+                voice=io.BytesIO(audio_bytes)
+                # Caption removido conforme solicitado
+            )
+        except Exception as e:
+            registrar_log(f"Erro ao gerar áudio: {str(e)}")
+            await update.message.reply_text(texto, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(texto, parse_mode="Markdown")
+
+
 async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     registrar_log(f"📥 Recebido /start de: {update.effective_user.first_name}")
     if update.message:
@@ -84,34 +104,17 @@ async def comando_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def comando_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-        
-    chat_id = update.message.chat_id
-    texto_usuario = " ".join(context.args) if context.args else ""
     
-    if not texto_usuario:
-        await update.message.reply_text("🗣️ Use o comando enviando sua pergunta junto!\nExemplo: `/voz quanto eu tenho na conta hoje?`", parse_mode="Markdown")
-        return
+    # Alterna o estado do modo de voz
+    estado_atual = context.user_data.get('modo_voz', False)
+    novo_estado = not estado_atual
+    context.user_data['modo_voz'] = novo_estado
+    
+    if novo_estado:
+        await update.message.reply_text("🎙️ *Modo de voz ATIVADO!*\nTodas as minhas respostas agora serão por áudio. Para desligar, envie `/voz` novamente.", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("🔇 *Modo de voz DESATIVADO!*\nVoltei a responder por texto.", parse_mode="Markdown")
 
-    await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
-    
-    df_trans = carregar_dados()
-    historico_raw = carregar_memoria_chat(limite=3)
-    historico_formatado = [{"role": "user" if item.get("papel") == "user" else "assistant", "content": item.get("conteudo", "")} for item in historico_raw]
-    
-    resposta_texto = consultar_alice(df_trans, historico_formatado, texto_usuario)
-    salvar_mensagem_memoria("user", texto_usuario)
-    salvar_mensagem_memoria("assistant", resposta_texto)
-    
-    try:
-        audio_bytes = gerar_audio_resposta(resposta_texto)
-        await context.bot.send_voice(
-            chat_id=chat_id,
-            voice=io.BytesIO(audio_bytes),
-            caption=f"💬 *Resposta:* {resposta_texto[:100]}...",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Não consegui gerar o áudio, mas aqui está a resposta:\n\n{resposta_texto}")
 
 async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -141,16 +144,14 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         tipo=res_pdf["tipo"]
                     )
                     sinal = "🟢 Entrada" if res_pdf["tipo"] == "receita" else "🔴 Saída"
-                    await update.message.reply_text(
-                        f"✅ *Documento PDF Processado e Salvo!*\n\n"
-                        f"📌 *Descrição:* {res_pdf['descricao']}\n"
-                        f"💰 *Valor:* R$ {res_pdf['valor']:,.2f}\n"
-                        f"🏷️ *Categoria:* {res_pdf.get('categoria', 'Outros')}\n"
-                        f"📊 *Tipo:* {sinal}",
-                        parse_mode="Markdown"
-                    )
+                    msg = (f"✅ *Documento PDF Processado e Salvo!*\n\n"
+                           f"📌 *Descrição:* {res_pdf['descricao']}\n"
+                           f"💰 *Valor:* R$ {res_pdf['valor']:,.2f}\n"
+                           f"🏷️ *Categoria:* {res_pdf.get('categoria', 'Outros')}\n"
+                           f"📊 *Tipo:* {sinal}")
+                    await responder_final(update, context, msg)
                 else:
-                    await update.message.reply_text(f"⚠️ {res_pdf.get('mensagem', 'Não foi possível extrair dados desse PDF.')}")
+                    await responder_final(update, context, f"⚠️ {res_pdf.get('mensagem', 'Não foi possível extrair dados desse PDF.')}")
                 return
 
         # Áudio
@@ -175,16 +176,14 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     tipo=res_img["tipo"]
                 )
                 sinal = "🟢 Entrada" if res_img["tipo"] == "receita" else "🔴 Saída"
-                await update.message.reply_text(
-                    f"✅ *Lançamento via Imagem Salvo!*\n\n"
-                    f"📌 *Item:* {res_img['descricao']}\n"
-                    f"💰 *Valor:* R$ {res_img['valor']:.2f}\n"
-                    f"🏷️ *Categoria:* {res_img.get('categoria', 'Outros')}\n"
-                    f"📊 *Tipo:* {sinal}",
-                    parse_mode="Markdown"
-                )
+                msg = (f"✅ *Lançamento via Imagem Salvo!*\n\n"
+                       f"📌 *Item:* {res_img['descricao']}\n"
+                       f"💰 *Valor:* R$ {res_img['valor']:.2f}\n"
+                       f"🏷️ *Categoria:* {res_img.get('categoria', 'Outros')}\n"
+                       f"📊 *Tipo:* {sinal}")
+                await responder_final(update, context, msg)
             else:
-                await update.message.reply_text(f"⚠️ {res_img.get('mensagem', 'Erro ao ler imagem.')}")
+                await responder_final(update, context, f"⚠️ {res_img.get('mensagem', 'Erro ao ler imagem.')}")
             return
 
         # Texto
@@ -207,14 +206,12 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 tipo=analise["tipo"]
             )
             sinal = "🟢 Entrada" if analise["tipo"] == "receita" else "🔴 Saída"
-            await update.message.reply_text(
-                f"✅ *Lançamento Registrado!*\n\n"
-                f"📌 *Descrição:* {analise['descricao']}\n"
-                f"💰 *Valor:* R$ {analise['valor']:.2f}\n"
-                f"🏷️ *Categoria:* {analise.get('categoria', 'Outros')}\n"
-                f"📊 *Tipo:* {sinal}",
-                parse_mode="Markdown"
-            )
+            msg = (f"✅ *Lançamento Registrado!*\n\n"
+                   f"📌 *Descrição:* {analise['descricao']}\n"
+                   f"💰 *Valor:* R$ {analise['valor']:.2f}\n"
+                   f"🏷️ *Categoria:* {analise.get('categoria', 'Outros')}\n"
+                   f"📊 *Tipo:* {sinal}")
+            await responder_final(update, context, msg)
 
         # ROTA 2: Simulação de Compra 
         elif tipo_acao == "simulacao_compra":
@@ -227,12 +224,12 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
             salvar_mensagem_memoria("user", texto_usuario)
             salvar_mensagem_memoria("assistant", resposta)
             
-            await update.message.reply_text(resposta, parse_mode="Markdown")
+            await responder_final(update, context, resposta)
 
         # ROTA 3: Memorizar fato
         elif tipo_acao == "memorizar":
             salvar_fato(analise["fato"])
-            await update.message.reply_text(f"🧠 *Aprendi novo fato:* \"{analise['fato']}\"", parse_mode="Markdown")
+            await responder_final(update, context, f"🧠 *Aprendi novo fato:* \"{analise['fato']}\"")
 
         # ROTA 4: Bate-papo geral
         else:
@@ -249,7 +246,7 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
             salvar_mensagem_memoria("user", texto_usuario)
             salvar_mensagem_memoria("assistant", resposta)
             
-            await update.message.reply_text(resposta, parse_mode="Markdown")
+            await responder_final(update, context, resposta)
 
     except Exception as e:
         registrar_log(f"❌ ERRO: {str(e)}")
