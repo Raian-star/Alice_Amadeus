@@ -110,7 +110,7 @@ def deletar_fato(fato_id):
     supabase.table("fatos_usuario").delete().eq("id", fato_id).execute()
 
 # --- LANÇAMENTOS RECORRENTES (RECEITAS E DESPESAS) ---
-def salvar_despesa_fixa(descricao, valor, categoria, dia_vencimento, tipo="despesa"):
+def salvar_despesa_fixa(descricao, valor, categoria, dia_vencimento, tipo="despesa", data_fim=None):
     supabase = get_supabase_client()
     data = {
         "descricao": descricao,
@@ -119,6 +119,8 @@ def salvar_despesa_fixa(descricao, valor, categoria, dia_vencimento, tipo="despe
         "dia_vencimento": int(dia_vencimento),
         "tipo": tipo
     }
+    if data_fim:
+        data["data_fim"] = data_fim
     supabase.table("despesas_fixas").insert(data).execute()
 
 def carregar_despesas_fixas():
@@ -147,6 +149,17 @@ def processar_despesas_fixas_mes_atual():
                 trans_existentes.add(t['descricao'])
 
     for item in res_fixas.data:
+        # Verifica se o gasto fixo tem data de validade e já expirou
+        data_fim_str = item.get("data_fim")
+        if data_fim_str:
+            try:
+                data_fim_obj = datetime.strptime(data_fim_str, "%Y-%m-%d")
+                # Se o mês/ano atual for maior que o mês/ano de fim, pula o lançamento
+                if hoje.year > data_fim_obj.year or (hoje.year == data_fim_obj.year and hoje.month > data_fim_obj.month):
+                    continue
+            except ValueError:
+                pass # Caso a data esteja em formato inválido, segue normalmente
+
         nome_marcador = f"[FIXO] {item['descricao']}"
         tipo_item = item.get('tipo', 'despesa')
         
