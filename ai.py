@@ -2,6 +2,7 @@ import os
 import io
 import json
 import base64
+import re
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -103,41 +104,47 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
         folga_mensal = 0.0
 
     mes_atual = datetime.now().month
-    meses_nomes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-    data_atual_str = f"{meses_nomes[mes_atual - 1]} de {datetime.now().year}"
+    meses_map = {
+        "janeiro": 1, "fevereiro": 2, "março": 3, "abril": 4, 
+        "maio": 5, "junho": 6, "julho": 7, "agosto": 8, 
+        "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12
+    }
+    
+    # Tenta encontrar um mês no texto do usuário para calcular os meses restantes em Python
+    meses_restantes = 0
+    texto_lower = texto_usuario.lower()
+    for nome_mes, num_mes in meses_map.items():
+        if re.search(rf"\b{nome_mes}\b", texto_lower):
+            if num_mes > mes_atual:
+                meses_restantes = num_mes - mes_atual
+            elif num_mes < mes_atual:
+                meses_restantes = (12 - mes_atual) + num_mes # Ano seguinte
+            break
+            
+    caixa_total_previsto = saldo_atual + (folga_mensal * meses_restantes)
+    valor_faltante = valor_compra - caixa_total_previsto
 
     prompt_sistema = f"""
-    Você é a Alice, uma assistente pessoal financeira.
+    Você é a Alice, uma assistente financeira. NUNCA FAÇA CÁLCULOS MATEMÁTICOS, use apenas os valores fornecidos abaixo.
     
-    [DADOS FINANCEIROS]
-    • Data Atual: {data_atual_str}
-    • Saldo Atual na Conta: R$ {saldo_atual:,.2f}
-    • Folga Mensal (Receitas Fixas - Despesas Fixas): R$ {folga_mensal:,.2f}
-    • Conhecimento Prévio: {fatos_longo_prazo}
-
-    [MISSÃO]
-    O usuário quer simular a compra abaixo.
-    • Mensagem: "{texto_usuario}"
-    • Item: {item}
-    • Valor: R$ {valor_compra:,.2f}
-
+    [DADOS JÁ CALCULADOS EXATOS]
+    • Item Desejado: {item}
+    • Valor da Compra: R$ {valor_compra:,.2f}
+    • Meses de Espera: {meses_restantes}
+    • Caixa Total Previsto na Data: R$ {caixa_total_previsto:,.2f}
+    
     REGRAS DE RESPOSTA:
-    1. Identifique o prazo pela mensagem (ex: "em dezembro").
-    2. Importante: Você não deve inventar cálculos.
-       - Mês atual: {mes_atual}
-       - Calcule mentalmente a diferença de meses entre o mês atual e o mês citado.
-       - Multiplique a diferença de meses pelo valor da Folga Mensal (R$ {folga_mensal:,.2f}).
-       - Some esse resultado ao Saldo Atual (R$ {saldo_atual:,.2f}) para encontrar o Caixa Total Previsto.
-    3. Compare o Caixa Total Previsto com o Valor da Compra (R$ {valor_compra:,.2f}).
-    4. Informe explicitamente o Caixa Total Previsto que você encontrou e se o valor é suficiente ou quanto faltará.
-    5. Seja direta, natural e não exiba passo a passo matemático chato.
+    1. Baseie-se ESTRITAMENTE no 'Caixa Total Previsto na Data'.
+    2. Se o Caixa Previsto for MENOR que o Valor da Compra, informe que faltarão R$ {valor_faltante:,.2f}.
+    3. Se for MAIOR, informe que a compra é segura.
+    4. Mantenha o tom de conselheira.
     """
 
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "system", "content": prompt_sistema}],
-            temperature=0.2
+            temperature=0.1
         )
         return response.choices[0].message.content
     except Exception as e:
