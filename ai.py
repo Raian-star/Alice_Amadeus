@@ -93,51 +93,51 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
     des_real = abs(df_trans[df_trans['tipo'] == 'despesa']['valor'].sum()) if not df_trans.empty else 0.0
     saldo_atual = rec_real - des_real
 
-    # Projeção de fluxo fixo mensal (Folga Financeira)
+    # Projeção de fluxo fixo mensal
     try:
         df_fixas = carregar_despesas_fixas()
         rec_fixa = df_fixas[df_fixas['tipo'] == 'receita']['valor'].sum() if not df_fixas.empty else 0.0
         des_fixa = abs(df_fixas[df_fixas['tipo'] == 'despesa']['valor'].sum()) if not df_fixas.empty else 0.0
         folga_mensal = rec_fixa - des_fixa
     except Exception:
-        rec_fixa, des_fixa, folga_mensal = 0.0, 0.0, 0.0
+        folga_mensal = 0.0
 
-    meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-    data_atual = f"{meses[datetime.now().month - 1]} de {datetime.now().year}"
+    mes_atual = datetime.now().month
+    meses_nomes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+    data_atual_str = f"{meses_nomes[mes_atual - 1]} de {datetime.now().year}"
 
     prompt_sistema = f"""
     Você é a Alice, uma assistente pessoal financeira.
     
-    [DADOS FINANCEIROS E TEMPORAIS]
-    • Data Atual: {data_atual}
+    [DADOS FINANCEIROS]
+    • Data Atual: {data_atual_str}
     • Saldo Atual na Conta: R$ {saldo_atual:,.2f}
-    • Receitas Fixas Mensais: R$ {rec_fixa:,.2f}
-    • Despesas Fixas Mensais: R$ {des_fixa:,.2f}
-    • Folga Financeira Projetada por Mês: R$ {folga_mensal:,.2f}
+    • Folga Mensal (Receitas Fixas - Despesas Fixas): R$ {folga_mensal:,.2f}
     • Conhecimento Prévio: {fatos_longo_prazo}
 
     [MISSÃO]
-    O usuário quer simular uma compra.
-    • Mensagem original: "{texto_usuario}"
-    • Item: {item if item else 'Gasto geral'}
+    O usuário quer simular a compra abaixo.
+    • Mensagem: "{texto_usuario}"
+    • Item: {item}
     • Valor: R$ {valor_compra:,.2f}
 
     REGRAS DE RESPOSTA:
-    1. Identifique se a compra é IMEDIATA ou FUTURA (ex: "em dezembro") pela mensagem.
-    2. Se for IMEDIATA: Avalie apenas pelo Saldo Atual na Conta.
-    3. Se for PROJEÇÃO FUTURA:
-       - Calcule quantos meses faltam até o mês desejado.
-       - Calcule o "Caixa Total Previsto" = Saldo Atual na Conta + (Folga Financeira Projetada * meses faltantes).
-       - Compare o valor pretendido da compra diretamente com esse Caixa Total Previsto.
-       - Se o Caixa Previsto cobrir a compra, dê o sinal verde informando quanto sobrará. Se não, diga exatamente quanto vai faltar.
-    4. Seja direta, aja como uma consultora parceira e não exiba as contas matemáticas complexas para o usuário, apenas os valores finais de previsão.
+    1. Identifique o prazo pela mensagem (ex: "em dezembro").
+    2. Importante: Você não deve inventar cálculos.
+       - Mês atual: {mes_atual}
+       - Calcule mentalmente a diferença de meses entre o mês atual e o mês citado.
+       - Multiplique a diferença de meses pelo valor da Folga Mensal (R$ {folga_mensal:,.2f}).
+       - Some esse resultado ao Saldo Atual (R$ {saldo_atual:,.2f}) para encontrar o Caixa Total Previsto.
+    3. Compare o Caixa Total Previsto com o Valor da Compra (R$ {valor_compra:,.2f}).
+    4. Informe explicitamente o Caixa Total Previsto que você encontrou e se o valor é suficiente ou quanto faltará.
+    5. Seja direta, natural e não exiba passo a passo matemático chato.
     """
 
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "system", "content": prompt_sistema}],
-            temperature=0.7
+            temperature=0.2
         )
         return response.choices[0].message.content
     except Exception as e:
