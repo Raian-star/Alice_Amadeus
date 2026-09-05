@@ -90,13 +90,12 @@ async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
     texto_usuario = ""
 
     try:
-        # Áudio
+        # Áudio (Transcrição silenciosa sem envio de mensagem intermediária)
         if update.message.voice or update.message.audio:
             registrar_log("🎙️ Processando áudio...")
             arquivo = await (update.message.voice or update.message.audio).get_file()
             audio_bytes = await arquivo.download_as_bytearray()
             texto_usuario = transcrever_audio(bytes(audio_bytes))
-            await update.message.reply_text(f"🎤 *Transcrição:* \"{texto_usuario}\"", parse_mode="Markdown")
 
         # Imagem (Nota / Comprovante)
         elif update.message.photo:
