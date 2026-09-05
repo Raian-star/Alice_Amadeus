@@ -19,6 +19,17 @@ def get_openai_client():
 
 openai_client = get_openai_client()
 
+def gerar_audio_resposta(texto: str) -> bytes:
+    try:
+        response = openai_client.audio.speech.create(
+            model="tts-1",
+            voice="nova",  # Voz feminina natural
+            input=texto
+        )
+        return response.content
+    except Exception as e:
+        raise Exception(f"Erro ao gerar áudio: {str(e)}")
+
 def transcrever_audio(audio_bytes: bytes) -> str:
     try:
         audio_file = io.BytesIO(audio_bytes)

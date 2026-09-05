@@ -1,5 +1,6 @@
 import os
 import sys
+import io
 import asyncio
 import logging
 import threading
@@ -13,7 +14,7 @@ from database import (
 )
 from ai import (
     processar_texto_com_ia, processar_imagem_com_ia, processar_pdf_com_ia,
-    transcrever_audio, consultar_alice, analisar_simulacao_compra
+    transcrever_audio, consultar_alice, analisar_simulacao_compra, gerar_audio_resposta
 )
 
 logging.basicConfig(
@@ -79,6 +80,38 @@ async def comando_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filename="Relatorio_Alice.pdf",
         caption="📄 Seu relatório financeiro completo em PDF."
     )
+
+async def comando_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+        
+    chat_id = update.message.chat_id
+    texto_usuario = " ".join(context.args) if context.args else ""
+    
+    if not texto_usuario:
+        await update.message.reply_text("🗣️ Use o comando enviando sua pergunta junto!\nExemplo: `/voz quanto eu tenho na conta hoje?`", parse_mode="Markdown")
+        return
+
+    await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
+    
+    df_trans = carregar_dados()
+    historico_raw = carregar_memoria_chat(limite=3)
+    historico_formatado = [{"role": "user" if item.get("papel") == "user" else "assistant", "content": item.get("conteudo", "")} for item in historico_raw]
+    
+    resposta_texto = consultar_alice(df_trans, historico_formatado, texto_usuario)
+    salvar_mensagem_memoria("user", texto_usuario)
+    salvar_mensagem_memoria("assistant", resposta_texto)
+    
+    try:
+        audio_bytes = gerar_audio_resposta(resposta_texto)
+        await context.bot.send_voice(
+            chat_id=chat_id,
+            voice=io.BytesIO(audio_bytes),
+            caption=f"💬 *Resposta:* {resposta_texto[:100]}...",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Não consegui gerar o áudio, mas aqui está a resposta:\n\n{resposta_texto}")
 
 async def responder_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -233,6 +266,7 @@ def _rodar_polling():
         app.add_handler(CommandHandler("start", comando_start))
         app.add_handler(CommandHandler("relatorio", comando_relatorio))
         app.add_handler(CommandHandler("pdf", comando_pdf))
+        app.add_handler(CommandHandler("voz", comando_voz))
         app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, responder_mensagem))
 
         loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
