@@ -8,3 +8,6 @@ python-dateutil
 plotly
 openpyxl
 python-telegram-bot
+google-api-python-client
+google-auth
+google-auth-httplib2
