@@ -4,7 +4,7 @@ import streamlit as st
 # 1. CONFIGURAÇÃO DA PÁGINA (Sempre no topo antes de renderizar)
 st.set_page_config(
     page_title="Alice - Painel ADM",
-    page_icon="👩‍💼",
+    page_icon="alice.png" if os.path.exists("alice.png") else "👩‍💼",  # Utiliza o arquivo de imagem se presente
     layout="wide"
 )
 
