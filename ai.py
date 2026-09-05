@@ -102,7 +102,6 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
     hoje = datetime.now()
     mes_atual = hoje.month
     ano_atual = hoje.year
-    dia_atual = hoje.day
 
     meses_map = {
         "janeiro": 1, "fevereiro": 2, "março": 3, "abril": 4, 
@@ -110,8 +109,7 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
         "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12
     }
     
-    # Extrai mês e dia do texto se informado (ex: "dia 15 de dezembro")
-    dia_alvo = 31 # Padrão é o fim do mês
+    dia_alvo = 31
     match_dia = re.search(r'\bdia\s+(\d{1,2})\b', texto_usuario.lower())
     if match_dia:
         dia_alvo = int(match_dia.group(1))
@@ -126,7 +124,6 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
                 meses_restantes = (12 - mes_atual) + num_mes
             break
             
-    # Cálculo proporcional por dia do mês
     caixa_total_previsto = saldo_atual
     
     for i in range(1, meses_restantes + 1):
@@ -145,11 +142,9 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
                 data_fim_str = row.get('data_fim')
                 dia_vencimento = int(row.get('dia_vencimento', 31))
                 
-                # Se for o mês final da simulação, considera apenas lançamentos até o dia alvo
                 if is_mes_final and dia_vencimento > dia_alvo:
                     valido = False
 
-                # Verifica se expirou pela data_fim
                 if valido and pd.notna(data_fim_str) and data_fim_str:
                     try:
                         data_fim_obj = datetime.strptime(str(data_fim_str), "%Y-%m-%d")
@@ -171,7 +166,7 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
     valor_faltante = valor_compra - caixa_total_previsto
 
     prompt_sistema = f"""
-    Você é a Alice, uma assistente financeira. NUNCA FAÇA CÁLCULOS MATEMÁTICOS, use apenas os valores fornecidos abaixo.
+    Você é a Alice, uma assistente e conselheira financeira acolhedora, parceira e amigável. NUNCA FAÇA CÁLCULOS MATEMÁTICOS, use apenas os valores fornecidos abaixo.
     
     [DADOS JÁ CALCULADOS EXATOS]
     • Item Desejado: {item}
@@ -180,9 +175,9 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
     
     REGRAS DE RESPOSTA:
     1. Baseie-se ESTRITAMENTE no 'Caixa Total Previsto no Dia Solicitado'.
-    2. Se o Caixa Previsto for MENOR que o Valor da Compra, informe que faltarão R$ {valor_faltante:,.2f}.
-    3. Se for MAIOR, informe que a compra é segura.
-    4. Mantenha o tom de conselheira.
+    2. Se o Caixa Previsto for MENOR que o Valor da Compra, informe de forma gentil e clara que faltarão R$ {valor_faltante:,.2f}.
+    3. Se for MAIOR, informe com entusiasmo que a compra é segura.
+    4. Mantenha um tom natural, humano e de parceira no seu planejamento.
     """
 
     try:
@@ -202,16 +197,16 @@ def consultar_alice(df_trans: pd.DataFrame, historico_mensagens: list, texto_atu
     saldo_disponivel = rec_real - des_real
 
     prompt_sistema = f"""
-    Você é a Alice, uma assistente pessoal e parceira inteligente, bem-humorada e direta.
+    Você é a Alice, uma assistente pessoal e parceira financeira inteligente, empática e amigável.
     
-    [CONTEXTO SILENCIOSO]
-    • Saldo Efetivado Atual: R$ {saldo_disponivel:,.2f}
+    [DADOS FINANCEIROS REAIS DE HOJE]
+    • Saldo Efetivado Atual no Banco: R$ {saldo_disponivel:,.2f}
     • Conhecimento Prévio: {fatos_longo_prazo}
 
-    REGRAS DE RESPOSTA:
-    1. RESPONDA DIRETAMENTE AO TEXTO DO USUÁRIO. Se ele perguntar o saldo, informe o Saldo Efetivado Atual de R$ {saldo_disponivel:,.2f}.
-    2. NUNCA responda com saudações genéricas como "Oi, como posso te ajudar?".
-    3. Mantenha o tom natural, conciso e amigável.
+    REGRAS DE RESPOSTA E TOM DE VOZ:
+    1. Quando o usuário perguntar seu saldo atual ou quanto tem na conta HOJE, informe SEMPRE o 'Saldo Efetivado Atual no Banco' (R$ {saldo_disponivel:,.2f}).
+    2. NUNCA confunda o saldo de hoje com projeções ou folgas do final do mês a menos que o usuário peça explicitamente uma estimativa futura.
+    3. Seja amigável, acolhedora e use um tom de parceira no dia a dia. Evite parecer um robô ou responder de forma seca.
     """
     
     mensagens_api = [{"role": "system", "content": prompt_sistema}] + historico_mensagens
