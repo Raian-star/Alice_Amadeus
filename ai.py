@@ -102,6 +102,7 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
     hoje = datetime.now()
     mes_atual = hoje.month
     ano_atual = hoje.year
+    dia_atual = hoje.day
 
     meses_map = {
         "janeiro": 1, "fevereiro": 2, "março": 3, "abril": 4, 
@@ -109,6 +110,12 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
         "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12
     }
     
+    # Extrai mês e dia do texto se informado (ex: "dia 15 de dezembro")
+    dia_alvo = 31 # Padrão é o fim do mês
+    match_dia = re.search(r'\bdia\s+(\d{1,2})\b', texto_usuario.lower())
+    if match_dia:
+        dia_alvo = int(match_dia.group(1))
+
     meses_restantes = 0
     texto_lower = texto_usuario.lower()
     for nome_mes, num_mes in meses_map.items():
@@ -116,10 +123,10 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
             if num_mes > mes_atual:
                 meses_restantes = num_mes - mes_atual
             elif num_mes < mes_atual:
-                meses_restantes = (12 - mes_atual) + num_mes # Ano seguinte
+                meses_restantes = (12 - mes_atual) + num_mes
             break
             
-    # Projeção de fluxo fixo iterativo (Mês a Mês) considerando data_fim
+    # Cálculo proporcional por dia do mês
     caixa_total_previsto = saldo_atual
     
     for i in range(1, meses_restantes + 1):
@@ -130,14 +137,20 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
             mes_futuro = ((mes_futuro - 1) % 12) + 1
             
         folga_deste_mes = 0.0
+        is_mes_final = (i == meses_restantes)
         
         if not df_fixas.empty:
             for _, row in df_fixas.iterrows():
                 valido = True
                 data_fim_str = row.get('data_fim')
+                dia_vencimento = int(row.get('dia_vencimento', 31))
                 
-                # Verifica se o gasto expirou neste mês específico
-                if pd.notna(data_fim_str) and data_fim_str:
+                # Se for o mês final da simulação, considera apenas lançamentos até o dia alvo
+                if is_mes_final and dia_vencimento > dia_alvo:
+                    valido = False
+
+                # Verifica se expirou pela data_fim
+                if valido and pd.notna(data_fim_str) and data_fim_str:
                     try:
                         data_fim_obj = datetime.strptime(str(data_fim_str), "%Y-%m-%d")
                         if ano_futuro > data_fim_obj.year or (ano_futuro == data_fim_obj.year and mes_futuro > data_fim_obj.month):
@@ -163,11 +176,10 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
     [DADOS JÁ CALCULADOS EXATOS]
     • Item Desejado: {item}
     • Valor da Compra: R$ {valor_compra:,.2f}
-    • Meses de Espera: {meses_restantes}
-    • Caixa Total Previsto na Data: R$ {caixa_total_previsto:,.2f}
+    • Caixa Total Previsto no Dia Solicitado: R$ {caixa_total_previsto:,.2f}
     
     REGRAS DE RESPOSTA:
-    1. Baseie-se ESTRITAMENTE no 'Caixa Total Previsto na Data'.
+    1. Baseie-se ESTRITAMENTE no 'Caixa Total Previsto no Dia Solicitado'.
     2. Se o Caixa Previsto for MENOR que o Valor da Compra, informe que faltarão R$ {valor_faltante:,.2f}.
     3. Se for MAIOR, informe que a compra é segura.
     4. Mantenha o tom de conselheira.
@@ -197,7 +209,7 @@ def consultar_alice(df_trans: pd.DataFrame, historico_mensagens: list, texto_atu
     • Conhecimento Prévio: {fatos_longo_prazo}
 
     REGRAS DE RESPOSTA:
-    1. RESPONDA DIRETAMENTE AO TEXTO DO USUÁRIO. Se ele pedir uma piada, conte uma piada. Se perguntar o que você faz, explique de forma sucinta.
+    1. RESPONDA DIRETAMENTE AO TEXTO DO USUÁRIO. Se ele perguntar o saldo, informe o Saldo Efetivado Atual de R$ {saldo_disponivel:,.2f}.
     2. NUNCA responda com saudações genéricas como "Oi, como posso te ajudar?".
     3. Mantenha o tom natural, conciso e amigável.
     """
