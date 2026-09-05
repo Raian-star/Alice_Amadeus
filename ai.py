@@ -87,9 +87,20 @@ def processar_imagem_com_ia(image_bytes: bytes) -> dict:
 
 def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: float, texto_usuario: str) -> str:
     fatos_longo_prazo = carregar_fatos()
+    
+    # Saldo atual efetivado
     rec_real = df_trans[df_trans['tipo'] == 'receita']['valor'].sum() if not df_trans.empty else 0.0
     des_real = abs(df_trans[df_trans['tipo'] == 'despesa']['valor'].sum()) if not df_trans.empty else 0.0
-    saldo_disponivel = rec_real - des_real
+    saldo_atual = rec_real - des_real
+
+    # Projeção de fluxo fixo mensal (Folga Financeira)
+    try:
+        df_fixas = carregar_despesas_fixas()
+        rec_fixa = df_fixas[df_fixas['tipo'] == 'receita']['valor'].sum() if not df_fixas.empty else 0.0
+        des_fixa = abs(df_fixas[df_fixas['tipo'] == 'despesa']['valor'].sum()) if not df_fixas.empty else 0.0
+        folga_mensal = rec_fixa - des_fixa
+    except Exception:
+        rec_fixa, des_fixa, folga_mensal = 0.0, 0.0, 0.0
 
     meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
     data_atual = f"{meses[datetime.now().month - 1]} de {datetime.now().year}"
@@ -99,24 +110,27 @@ def analisar_simulacao_compra(df_trans: pd.DataFrame, item: str, valor_compra: f
     
     [DADOS FINANCEIROS E TEMPORAIS]
     • Data Atual: {data_atual}
-    • Saldo Efetivado Atual: R$ {saldo_disponivel:,.2f}
+    • Saldo Atual na Conta: R$ {saldo_atual:,.2f}
+    • Receitas Fixas Mensais: R$ {rec_fixa:,.2f}
+    • Despesas Fixas Mensais: R$ {des_fixa:,.2f}
+    • Folga Financeira Projetada por Mês: R$ {folga_mensal:,.2f}
     • Conhecimento Prévio: {fatos_longo_prazo}
 
     [MISSÃO]
     O usuário quer simular uma compra.
     • Mensagem original: "{texto_usuario}"
-    • Item/Motivo: {item if item else 'Gasto geral'}
-    • Valor Pretendido: R$ {valor_compra:,.2f}
+    • Item: {item if item else 'Gasto geral'}
+    • Valor: R$ {valor_compra:,.2f}
 
     REGRAS DE RESPOSTA:
-    1. Identifique se a compra é IMEDIATA ou FUTURA (ex: "em dezembro", "ano que vem") analisando a mensagem original.
-    2. Se for IMEDIATA:
-       - Subtraia do saldo atual. Se faltar dinheiro, informe que não é o momento.
+    1. Identifique se a compra é IMEDIATA ou FUTURA (ex: "em dezembro") pela mensagem.
+    2. Se for IMEDIATA: Avalie apenas pelo Saldo Atual na Conta.
     3. Se for PROJEÇÃO FUTURA:
-       - Calcule quantos meses faltam entre a Data Atual e a data desejada.
-       - Se o saldo não cobrir o valor total, calcule exatamente quanto falta e divida pelos meses restantes.
-       - Monte um mini plano de ação claro (ex: "Faltam 3 meses. Você precisará juntar R$ X por mês até lá para conseguir comprar à vista").
-    4. Seja direta, humana e motivadora.
+       - Calcule quantos meses faltam até o mês desejado.
+       - Calcule o "Caixa Total Previsto" = Saldo Atual na Conta + (Folga Financeira Projetada * meses faltantes).
+       - Compare o valor pretendido da compra diretamente com esse Caixa Total Previsto.
+       - Se o Caixa Previsto cobrir a compra, dê o sinal verde informando quanto sobrará. Se não, diga exatamente quanto vai faltar.
+    4. Seja direta, aja como uma consultora parceira e não exiba as contas matemáticas complexas para o usuário, apenas os valores finais de previsão.
     """
 
     try:
